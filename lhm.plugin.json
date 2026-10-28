@@ -1,0 +1,1058 @@
+{
+  "identifier": "ayhire",
+  "name": "AyHire",
+  "version": "1.0.1",
+  "description": "Hire engineers by what they shipped. Describe a role and AyHire finds developers from their public GitHub work, judges each one against the role's criteria with links to the evidence, says who is open to work, and keeps roles and a shortlist shared with the AyHire web app. Hosted Streamable HTTP server with OAuth 2.1 sign-in.",
+  "author": "AyHire",
+  "authorUrl": "https://ayhire.com",
+  "homepage": "https://ayhire.com",
+  "cloudEndpoint": "https://ayhire.com/mcp",
+  "category": "productivity",
+  "icon": "https://raw.githubusercontent.com/NajibNawneet/ayhire-mcp/main/assets/logo.png",
+  "tags": [
+    "recruiting",
+    "hiring",
+    "github",
+    "sourcing",
+    "talent"
+  ],
+  "tools": [
+    {
+      "name": "whoami",
+      "description": "Check that AyHire is connected and which account is calling. Call this first when setting up or when other AyHire tools fail with an auth error.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "disconnect",
+      "description": "End this agent's connection to AyHire: the key or sign-in it uses stops working right away, on AyHire's side. Use it only when the user asks to sign out, log out, disconnect, remove or forget AyHire here. The AyHire website stays signed in; other agents stay connected unless they use the same key. After it, AyHire's tools stop working in this agent: don't try to sign in again unless the user asks to reconnect.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "analyze_github_user",
+      "description": "For someone in a role, use score_role_person instead (it also judges them against the role's criteria). Score a GitHub user's public work on 4 general dimensions (technical_depth, shipping_velocity, communication, gem_score; 0-10 each, total out of 40) with findings (what their work shows) and red flags, each with the GitHub links it rests on (claims without a source are dropped), and top skills. The analysis reads their own repos and their work on other people's projects (`outside_work`: commits and PRs by repo, last year). The scores are general: none is judged against a role, and where someone lives is never used. Returns a saved result if the user was analyzed in the last 30 days (free, cached=true); otherwise scrapes, scores and saves (takes 15-25s). Also returns `activity`: their GitHub contribution calendar for the last year, summarized (total, active weeks, streaks, busiest month, last active; null when GitHub has none). Set refresh=true only when the user asks for a fresh analysis.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "GitHub username, e.g. 'shadcn'"
+          },
+          "refresh": {
+            "type": "boolean",
+            "description": "Ignore a saved result and re-analyze",
+            "default": false
+          },
+          "persist": {
+            "type": "boolean",
+            "description": "Save a new result to the candidates table",
+            "default": true
+          }
+        },
+        "required": [
+          "username"
+        ]
+      }
+    },
+    {
+      "name": "analyze_github_users",
+      "description": "Analyze up to 25 GitHub users in one call and get them back ranked, best total first (totals are out of 40), each with the four general scores, a summary, top skills and red flags. Saved analyses from the last 30 days are free and instant. Up to 4 new analyses start per call (about 20-35 s together); anyone else comes back in `pending`: call again with those. New analyses count toward the hourly limit (20); when it's spent the rest come back in `limited` with limit_resets_at (without a plan: limit_reason says so). Use it to compare a shortlist or to score the people find_people_behind_repos returned.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "usernames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 25,
+            "description": "GitHub usernames, e.g. ['shadcn', 'leerob']"
+          }
+        },
+        "required": [
+          "usernames"
+        ]
+      }
+    },
+    {
+      "name": "score_candidate",
+      "description": "For someone in a role, use score_role_person instead (it also judges them against the role's criteria). Lightweight version of analyze_github_user that never writes to the database. Uses a saved result if one is fresh; otherwise scrapes and scores without saving.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "GitHub username to score"
+          },
+          "refresh": {
+            "type": "boolean",
+            "description": "Ignore a saved result and re-score",
+            "default": false
+          }
+        },
+        "required": [
+          "username"
+        ]
+      }
+    },
+    {
+      "name": "find_people_behind_repos",
+      "description": "Find the developers who build open-source projects: searches GitHub for repositories (most stars first) matching a query, topic or language, then lists the people who contributed most to them, ranked by how many of those repos they build and how much they contributed. Bots and AI coding agents are excluded. Pass repo ('owner/name') for the people behind one exact project, or org ('vercel') for the people behind an organization's repos (each person has public_member; false only means not shown as a member). Mining several seed repos one after another is often the best way to find strong people. location keeps people whose GitHub location is in one of the places, plus people who list no location, marked location_match: 'unknown' (unknown is never a mismatch; location_unknown: 'exclude' leaves them out). page reads the next set of repos. With role_id, people the role has already seen are left out (unless include_seen) and the search goes in the role's history. Free (GitHub only).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Words matched against repo name, description and README, e.g. 'agent framework'"
+          },
+          "repo": {
+            "type": "string",
+            "description": "One exact repo, 'owner/name' or its GitHub URL: the people who build it"
+          },
+          "org": {
+            "type": "string",
+            "description": "A GitHub organization (or account), e.g. 'vercel': the people behind its top repos. Combine with query/language to narrow"
+          },
+          "topic": {
+            "type": "string",
+            "description": "GitHub topic, e.g. 'llm' or 'react'"
+          },
+          "language": {
+            "type": "string",
+            "description": "Main repo language, e.g. 'Python', 'TypeScript', 'Rust'"
+          },
+          "min_stars": {
+            "type": "number",
+            "description": "Minimum stars (default 1000; 0 with org)"
+          },
+          "created_after": {
+            "type": "string",
+            "description": "Only repos created on/after this date (YYYY-MM-DD), for 'went viral recently'"
+          },
+          "pushed_after": {
+            "type": "string",
+            "description": "Only repos pushed on/after this date (YYYY-MM-DD), to skip abandoned projects"
+          },
+          "repo_limit": {
+            "type": "number",
+            "description": "How many repos to look at (1-20, default 10)"
+          },
+          "people_per_repo": {
+            "type": "number",
+            "description": "Top contributors to take from each repo (1-20, default 5; with repo 1-30, default 20)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max people to return (1-100, default 25)"
+          },
+          "page": {
+            "type": "number",
+            "description": "Page of matching repos (default 1; 2 and on for the next ones)"
+          },
+          "location": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ],
+            "description": "Places to keep: cities, countries or regions, e.g. ['Germany', 'Berlin'] or 'Europe'. A country also matches its main cities, and a region (Europe, US, North America, UK) its countries and their cities; anything else matches the words people wrote on their profile. Up to 40."
+          },
+          "location_unknown": {
+            "type": "string",
+            "enum": [
+              "include",
+              "exclude"
+            ],
+            "description": "With location: keep (default, marked unknown) or leave out people who list no location"
+          },
+          "role_id": {
+            "type": "string",
+            "description": "Optional role id: this search is logged in the role's search history, everyone it returns is marked as seen for the role, and people the role has already seen are left out (unless include_seen). Nothing is added to the role: use add_people_to_role."
+          },
+          "include_seen": {
+            "type": "boolean",
+            "description": "With role_id: also return people the role has already seen (default false)",
+            "default": false
+          }
+        }
+      }
+    },
+    {
+      "name": "search_people",
+      "description": "Search GitHub profiles: words matched against name, login and bio (e.g. 'rust database', 'GTM engineer', 'AI adoption'; GitHub needs every word to match, so use one to three), a location (a city, a country, or a region such as Europe), language of their repos, minimum followers or repos. Each person comes back with bio, location, company, followers, the hireable flag and their top 3 own repos. Good for roles where profiles say more than repos, and for a location constraint; for engineers, mining the contributors of seed repos (find_people_behind_repos) is often stronger. Returns the exact query run and the total; pass next_cursor as cursor for more. With role_id, people the role has already seen are left out (unless include_seen) and the search goes in the role's history. Free.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Words for name, login and bio"
+          },
+          "location": {
+            "type": "string",
+            "description": "One place: a city or country as people write it ('Berlin', 'Germany'), or a region ('Europe', 'North America'). A region reads the top 100 matches and keeps the people located in it (region_filter says how many)."
+          },
+          "language": {
+            "type": "string",
+            "description": "Language of their repos, e.g. 'Rust'"
+          },
+          "min_followers": {
+            "type": "number"
+          },
+          "min_repos": {
+            "type": "number"
+          },
+          "sort": {
+            "type": "string",
+            "enum": [
+              "best",
+              "followers",
+              "repositories",
+              "joined"
+            ],
+            "description": "Default best (GitHub's relevance)"
+          },
+          "cursor": {
+            "type": "string",
+            "description": "next_cursor from the previous call, for the next page"
+          },
+          "limit": {
+            "type": "number",
+            "description": "1-50, default 30"
+          },
+          "role_id": {
+            "type": "string",
+            "description": "Optional role id: this search is logged in the role's search history, everyone it returns is marked as seen for the role, and people the role has already seen are left out (unless include_seen). Nothing is added to the role: use add_people_to_role."
+          },
+          "include_seen": {
+            "type": "boolean",
+            "description": "With role_id: also return people the role has already seen (default false)",
+            "default": false
+          }
+        }
+      }
+    },
+    {
+      "name": "search_repos",
+      "description": "Search GitHub repositories by words, topic, language, owner org, stars and dates, most stars (or most recently updated) first, 30 a page, each with description, stars, topics, owner type and dates. Use it to find seed lists (awesome lists, community directories), the projects a role would work on, or small serious repos (no star floor by default), then mine their people with find_people_behind_repos(repo=...). Topic searches are usually cleaner than keywords; every word must match, so use few. Returns the exact query run. Free.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Words matched against name, description and README"
+          },
+          "topic": {
+            "type": "string",
+            "description": "GitHub topic, e.g. 'ai-adoption' or 'database'"
+          },
+          "language": {
+            "type": "string"
+          },
+          "org": {
+            "type": "string",
+            "description": "Only repos owned by this organization or account"
+          },
+          "min_stars": {
+            "type": "number",
+            "description": "Default 0"
+          },
+          "created_after": {
+            "type": "string",
+            "description": "YYYY-MM-DD"
+          },
+          "pushed_after": {
+            "type": "string",
+            "description": "YYYY-MM-DD"
+          },
+          "sort": {
+            "type": "string",
+            "enum": [
+              "stars",
+              "updated"
+            ],
+            "description": "Default stars"
+          },
+          "page": {
+            "type": "number",
+            "description": "From 1 (30 a page, up to 10)"
+          }
+        }
+      }
+    },
+    {
+      "name": "search_commits",
+      "description": "Find who actually wrote commits matching some words, e.g. 'smartlead webhook', 'hubspot sync', 'mvcc snapshot isolation', optionally inside one repo or org. People come back grouped, most matching commits first, with up to 3 example commits each (repo, subject, UTC day, link) and how many repos their matching commits are in. Commits in forks are skipped (counted as in_forks) unless you name the repo. Good for finding practitioners whose work is spread over many small repos. Commits whose email isn't linked to a GitHub account are only counted (unattributed). With role_id, people the role has already seen are left out (unless include_seen) and the search goes in the role's history. Free; uses GitHub's search (about 30 a minute).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Plain words, e.g. 'n8n hubspot'"
+          },
+          "repo": {
+            "type": "string",
+            "description": "Only this repo, owner/name (optional)"
+          },
+          "org": {
+            "type": "string",
+            "description": "Only this org (optional)"
+          },
+          "page": {
+            "type": "number",
+            "description": "From 1 (100 commits a page)"
+          },
+          "role_id": {
+            "type": "string",
+            "description": "Optional role id: this search is logged in the role's search history, everyone it returns is marked as seen for the role, and people the role has already seen are left out (unless include_seen). Nothing is added to the role: use add_people_to_role."
+          },
+          "include_seen": {
+            "type": "boolean",
+            "description": "With role_id: also return people the role has already seen (default false)",
+            "default": false
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "get_person_evidence",
+      "description": "Everything a recruiter would click through on GitHub to judge someone, in one call, each item with its link: profile and profile README, their repos (code, prose such as playbooks and lists, or forks) with descriptions, how they worked on their top repos (commits, active days, how many made with an AI coding agent), their work on other people's projects from the contribution graph (last year), pull requests they opened to other repos (grouped, merged counts, titles), orgs, activity month by month, and, with role_id, the repos the role's search found them through and their history there. Read live from GitHub, free, about 5 s. Use it to check a claim or judge fit yourself; `unknown` lists what GitHub could not show this time (unknown is not a weakness). Compact by default (own repos only, forks counted; shorter lists); detail: 'full' for everything. Whole READMEs: read_readme. All PRs or commits: list_pull_requests, list_commits.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "GitHub username"
+          },
+          "role_id": {
+            "type": "string",
+            "description": "Optional: a role, to add the repos it found them through (fine before they are added)"
+          },
+          "detail": {
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ],
+            "description": "Default compact"
+          }
+        },
+        "required": [
+          "username"
+        ]
+      }
+    },
+    {
+      "name": "read_readme",
+      "description": "The whole README of any public GitHub repo (up to 30,000 characters, with truncated=true beyond), with its link. Read the work itself before you judge it: what the project does, how serious it is, how well it is explained. Free.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repo": {
+            "type": "string",
+            "description": "owner/name or a github.com URL, e.g. 'tursodatabase/turso'"
+          }
+        },
+        "required": [
+          "repo"
+        ]
+      }
+    },
+    {
+      "name": "contribution_profile",
+      "description": "What a developer actually did in one repo, in one call: merged pull requests (count, first and last, the newest 10 with size and links), the code areas those PRs touched (e.g. core/mvcc 22, core/translate 9), PRs still open, PRs of others they reviewed, their commits there (catches people who commit directly), and their rank among its contributors. Use it to check a claim like 'core contributor to the storage engine' or to see someone's real area in a big project. Free, live, about 3 s.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "GitHub username"
+          },
+          "repo": {
+            "type": "string",
+            "description": "owner/name or a github.com URL"
+          }
+        },
+        "required": [
+          "username",
+          "repo"
+        ]
+      }
+    },
+    {
+      "name": "list_pull_requests",
+      "description": "Pull requests a developer opened, newest first, 30 a page, each with its repo, title, link, state, whether it was merged and the start of its description. Narrow to one repo ('owner/name') or a state (open, closed, merged). Use it to see what they actually changed in projects they don't own. Free; uses GitHub's search, which allows about 30 searches a minute.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "GitHub username"
+          },
+          "repo": {
+            "type": "string",
+            "description": "Only this repo, 'owner/name' (optional)"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed",
+              "merged"
+            ],
+            "description": "Only this state (optional)"
+          },
+          "page": {
+            "type": "number",
+            "description": "Page, from 1 (30 a page, up to 10)"
+          }
+        },
+        "required": [
+          "username"
+        ]
+      }
+    },
+    {
+      "name": "list_commits",
+      "description": "A developer's commits in one repo (theirs or anyone's), newest first, 30 a page: subject, date, link, co-authors named in the commit, and whether it was made with an AI coding agent. Use it to see what they did in a project and how they work. Free.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "GitHub username"
+          },
+          "repo": {
+            "type": "string",
+            "description": "owner/name or a github.com URL"
+          },
+          "page": {
+            "type": "number",
+            "description": "Page, from 1 (30 a page)"
+          }
+        },
+        "required": [
+          "username",
+          "repo"
+        ]
+      }
+    },
+    {
+      "name": "enrich_person",
+      "description": "For one GitHub user: LinkedIn URL, headline and current companies, a work email, and their X profile, with the source and confidence of each. Uses GitHub first (free), then paid lookups (usually $0.001-0.015, up to ~$0.03 with deep=true). Saved and reused for 30 days (cached=true is free). Use it on people the user is seriously considering, not on every name in a list. deep=true also searches the X bio and by name + company.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "GitHub username"
+          },
+          "deep": {
+            "type": "boolean",
+            "description": "Also try harder ways to find LinkedIn (X bio, name + company search). Costs more.",
+            "default": false
+          },
+          "find_email": {
+            "type": "boolean",
+            "description": "Look up a work email if GitHub has none",
+            "default": true
+          },
+          "refresh": {
+            "type": "boolean",
+            "description": "Ignore a saved result and look up again",
+            "default": false
+          }
+        },
+        "required": [
+          "username"
+        ]
+      }
+    },
+    {
+      "name": "check_availability",
+      "description": "Is this GitHub user already employed or open to work? Combines their current LinkedIn role, the company on their GitHub profile and GitHub's 'available for hire' flag. Returns a cautious verdict (employed, employed_but_open, open_to_work, likely_employed, unknown) with the evidence. Runs the same lookups as enrich_person (and saves them), so calling both costs nothing extra.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "GitHub username"
+          },
+          "deep": {
+            "type": "boolean",
+            "description": "Also try harder ways to find LinkedIn. Costs more.",
+            "default": false
+          }
+        },
+        "required": [
+          "username"
+        ]
+      }
+    },
+    {
+      "name": "search_candidates",
+      "description": "Plain-language search over developers AyHire has already analyzed (semantic similarity plus score ranking), e.g. 'senior Rust backend engineer with distributed systems experience'. Only finds people analyzed before; use analyze_github_user to add someone.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "What you're looking for, in plain language"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results (1-50)",
+            "default": 10
+          },
+          "threshold": {
+            "type": "number",
+            "description": "Minimum similarity (0-1)",
+            "default": 0.4
+          },
+          "filters": {
+            "type": "object",
+            "properties": {
+              "company": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "org": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "languages": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "min_stars": {
+                "type": "number"
+              },
+              "category": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "list_roles",
+      "description": "The roles (open positions) in your current workspace (or `workspace`), newest first, each with counts of picks, set aside, not looked at yet and shortlisted.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workspace": {
+            "type": "string",
+            "description": "Workspace name or id (optional). Default: your current workspace, the one the web app shows. See list_workspaces."
+          }
+        }
+      }
+    },
+    {
+      "name": "create_role",
+      "description": "Create a role (an open position) to source people for. AyHire suggests its criteria from the title and brief (what the role needs, each with an importance: must, important or nice; people are judged against them) unless you pass `criteria`, and turns the title and brief into a starting GitHub search unless you pass query/language. The role goes in your current workspace (or `workspace`) and also appears in the AyHire web app.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "e.g. 'Senior TypeScript engineer, AI agents'"
+          },
+          "brief": {
+            "type": "string",
+            "description": "What the role needs, in plain words (optional)"
+          },
+          "query": {
+            "type": "string",
+            "description": "Words to search repos for, e.g. 'agent framework' (optional)"
+          },
+          "language": {
+            "type": "string",
+            "description": "Main repo language, e.g. 'TypeScript' (optional)"
+          },
+          "created_after": {
+            "type": "string",
+            "description": "Only repos created on/after YYYY-MM-DD, for recent hits (optional)"
+          },
+          "criteria": {
+            "type": "array",
+            "maxItems": 8,
+            "description": "What the role needs, judged from public work: 3-6 items, each { name (2-6 words, specific), description (what good public evidence looks like), importance (must | important | nice) }. Never personal traits or location (location is a search filter).",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "importance": {
+                  "type": "string",
+                  "enum": [
+                    "must",
+                    "important",
+                    "nice"
+                  ]
+                }
+              },
+              "required": [
+                "name"
+              ]
+            }
+          },
+          "workspace": {
+            "type": "string",
+            "description": "Workspace name or id (optional). Default: your current workspace, the one the web app shows. See list_workspaces."
+          }
+        },
+        "required": [
+          "title"
+        ]
+      }
+    },
+    {
+      "name": "set_role_criteria",
+      "description": "Replace a role's criteria: what the role needs, each judged from someone's public work, with an importance (must, important or nice). Use the user's words; specific beats generic ('Storage engine internals', not 'Strong engineer'). People judged against the old criteria show as out of date until score_role_person judges them again. The web app shows the same criteria.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "role_id": {
+            "type": "string"
+          },
+          "criteria": {
+            "type": "array",
+            "maxItems": 8,
+            "description": "What the role needs, judged from public work: 3-6 items, each { name (2-6 words, specific), description (what good public evidence looks like), importance (must | important | nice) }. Never personal traits or location (location is a search filter).",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "importance": {
+                  "type": "string",
+                  "enum": [
+                    "must",
+                    "important",
+                    "nice"
+                  ]
+                }
+              },
+              "required": [
+                "name"
+              ]
+            }
+          }
+        },
+        "required": [
+          "role_id",
+          "criteria"
+        ]
+      }
+    },
+    {
+      "name": "suggest_role_criteria",
+      "description": "Suggest criteria for a role from its title and brief, without saving them: show them to the user, then save with set_role_criteria (as they are or changed). Useful when the brief changed or the current criteria feel off.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "role_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "role_id"
+        ]
+      }
+    },
+    {
+      "name": "get_role",
+      "description": "A role and everyone in it, ranked: picks first (people judged against the role's criteria by the evidence of fit, then the rest by the general strength of their public work; ranking_basis says which), then set aside (public evidence against a must-have), then people not looked at yet. This is the final order: call it after scoring. Each person has AyHire's call (headline, one-line why, one thing to check), their verdict per criterion with links, your decision, notes, availability and total score. Compact by default (shorter reasons, up to 2 links a verdict, at most 25 people not looked at yet); detail: 'full' for everything. Use it to answer 'who should I talk to first?'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "role_id": {
+            "type": "string",
+            "description": "From list_roles or create_role"
+          },
+          "include": {
+            "type": "string",
+            "enum": [
+              "picks",
+              "all"
+            ],
+            "description": "picks (default): picks and shortlisted only; all: everyone",
+            "default": "picks"
+          },
+          "detail": {
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ],
+            "description": "Default compact"
+          }
+        },
+        "required": [
+          "role_id"
+        ]
+      }
+    },
+    {
+      "name": "find_people_for_role",
+      "description": "Run the role's own search and save everyone it finds to the role. A role with a search plan (search_plan in get_role: the role's mix, tools and 3-6 searches read from its brief) runs every search in it: repos about the work, repos using the tools, profiles that say the job, and the tools' own maintainers (kept apart as builders). Each search is answered from AyHire's own index of people first and searched live on GitHub only where the index is thin or older than a month. Each person comes with why_found, source (index or GitHub just now) and a relevance (area fit, the brief's similarity, quality, feedback). Older roles run one search: people behind the top repos matching its words and language. role. People the role has already seen are left out, so each round brings new people (include_seen to bring them back); page 2 and on read the next repos. Returns everyone found with name, company, location, GitHub 'hireable' flag, followers, the matching repos they build and how much. To choose people yourself instead, use the search tools with role_id (search_people, find_people_behind_repos, search_commits) and add_people_to_role. Nothing is scored yet: call score_role_person for the people worth a closer look. Free (GitHub only). Pass query/language to search differently this time.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "role_id": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string",
+            "description": "Override the search words for this run, e.g. 'vector database' (optional)"
+          },
+          "language": {
+            "type": "string",
+            "description": "Override the repo language for this run, e.g. 'Rust' (optional)"
+          },
+          "page": {
+            "type": "number",
+            "description": "Page of matching repos (default 1)"
+          },
+          "location": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ],
+            "description": "Keep only people whose GitHub location is in one of these places: cities, countries or regions (Europe, US, North America, UK). Profile searches use GitHub's location filter, so local people are found, not just filtered; people there come first."
+          },
+          "location_unknown": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "include",
+              "exclude"
+            ],
+            "description": "With location: people who list no location. auto (default) keeps them only when at least 3 people matched the places; include always keeps them after the matches; exclude never does. location_filter.note says when few or none matched."
+          },
+          "include_seen": {
+            "type": "boolean",
+            "description": "Also return people the role has already seen (default false)",
+            "default": false
+          }
+        },
+        "required": [
+          "role_id"
+        ]
+      }
+    },
+    {
+      "name": "add_people_to_role",
+      "description": "Add people you chose (from any search, or ones you know) to a role, each with a one-line reason in plain words: why they fit this role, from their work (e.g. 'Wrote the MVCC layer of turso: 103 merged PRs titled mvcc'). The role keeps the reason and how they were found, shown in the web app and in get_role. Up to 25 at a time. People already in the role keep their decision and notes; a new reason replaces the old one. Then score_role_person scores them.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "role_id": {
+            "type": "string"
+          },
+          "people": {
+            "type": "array",
+            "maxItems": 25,
+            "items": {
+              "type": "object",
+              "properties": {
+                "username": {
+                  "type": "string",
+                  "description": "GitHub username"
+                },
+                "reason": {
+                  "type": "string",
+                  "description": "Why they fit this role, from their work (one line)"
+                }
+              },
+              "required": [
+                "username",
+                "reason"
+              ]
+            }
+          },
+          "found_via": {
+            "type": "string",
+            "description": "The search that surfaced them, in words, e.g. \"search_people 'rust database' in Germany\" (optional)"
+          }
+        },
+        "required": [
+          "role_id",
+          "people"
+        ]
+      }
+    },
+    {
+      "name": "score_role_person",
+      "description": "Analyze one person (4 general scores, summary, red flags; reads their own repos, their work on other people's projects and the repos the role's search found them through), judge them against the role's criteria (each verdict with links to its evidence; unknown is never a negative), and check whether they're available, then return them with AyHire's call and their place among the picks so far. Someone not in the role yet is added first (pass reason). A saved analysis is free and instant; a new one takes 15-25 seconds and counts toward the hourly limit (20 analyses), so score the people worth it, not everyone. The order changes as you score more people: call get_role for the final ranking. If a call times out, call it once more: when the analysis finished in the meantime, the retry is instant and free.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "role_id": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string",
+            "description": "GitHub username"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why they fit, from their work (one line); kept when they're added to the role now"
+          }
+        },
+        "required": [
+          "role_id",
+          "username"
+        ]
+      }
+    },
+    {
+      "name": "decide",
+      "description": "Record a decision on someone in a role: shortlisted, not_now, or none (undo). Optionally add a note. Decisions are shared with everyone in the role's workspace. Shortlisted people show up in get_shortlist and in the web app's Shortlist.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "role_id": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string",
+            "description": "GitHub username of someone in the role"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "shortlisted",
+              "not_now",
+              "none"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "description": "Optional note, replaces the existing one"
+          }
+        },
+        "required": [
+          "role_id",
+          "username",
+          "decision"
+        ]
+      }
+    },
+    {
+      "name": "get_shortlist",
+      "description": "Everyone shortlisted in your current workspace (or `workspace`), across its roles (the same list as the web app's Shortlist), most recent first, with AyHire's call and the notes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workspace": {
+            "type": "string",
+            "description": "Workspace name or id (optional). Default: your current workspace, the one the web app shows. See list_workspaces."
+          }
+        }
+      }
+    },
+    {
+      "name": "watch_person",
+      "description": "Watch someone in your current workspace (or `workspace`), with or without a role. About once a day AyHire re-checks their public GitHub profile and activity, and each change you asked about shows on Home and in list_watches with the link where it was seen. `rules` (default: all): open_to_work (GitHub “available for hire” turns on, or bio/LinkedIn headline says #OpenToWork), job_change (the company on their GitHub profile changes; their LinkedIn employer when AyHire reads it), says_looking (bio/headline says looking for, seeking or available for new work), new_work (public activity after 30+ quiet days, a new public repo or a release). paid_checks=true also re-reads their LinkedIn every 14 days when AyHire already has it: a paid lookup, about $0.005 each, within AyHire's limits. Ask the user before turning it on. Watches are shared with the workspace's team. AyHire can't watch for posts (e.g. about leaving a job): it doesn't read them.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "Their GitHub username"
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "open_to_work",
+                "job_change",
+                "says_looking",
+                "new_work"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 4,
+            "uniqueItems": true,
+            "description": "What to hear about (default: all four)"
+          },
+          "paid_checks": {
+            "type": "boolean",
+            "description": "Also re-read their LinkedIn every 14 days (paid, about $0.005 each). Ask first."
+          },
+          "role_id": {
+            "type": "string",
+            "description": "The role this is for (optional, for context). They must already be in that role (add_people_to_role first)."
+          },
+          "workspace": {
+            "type": "string",
+            "description": "Workspace name or id (optional). Default: your current workspace, the one the web app shows. See list_workspaces."
+          }
+        },
+        "required": [
+          "username"
+        ]
+      }
+    },
+    {
+      "name": "unwatch_person",
+      "description": "Stop watching someone in your current workspace (or `workspace`). Their daily checks stop for this workspace.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "Their GitHub username"
+          },
+          "workspace": {
+            "type": "string",
+            "description": "Workspace name or id (optional). Default: your current workspace, the one the web app shows. See list_workspaces."
+          }
+        },
+        "required": [
+          "username"
+        ]
+      }
+    },
+    {
+      "name": "list_watches",
+      "description": "Everyone watched in your current workspace (or `workspace`): what each watch is for, when AyHire last checked, and the latest change with its link. Each watch's may_fit lists open roles in this workspace the person may also fit, from AyHire's index of their public work (no model, never location), with the reason and its link; added is true once they are in that role (don't add them again). Add someone with add_people_to_role.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workspace": {
+            "type": "string",
+            "description": "Workspace name or id (optional). Default: your current workspace, the one the web app shows. See list_workspaces."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_workspaces",
+      "description": "Your AyHire workspaces and which one is current. A workspace holds roles and their shortlist: one per company you hire for, shared with that company's team. Every account has a personal one. Each shows its company's email domain and logo when it has one, and waiting_to_join lists workspaces you asked to join that an owner hasn't let you into yet.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "switch_workspace",
+      "description": "Make one of your workspaces the current one, for this agent and the web app. Role tools then list and create there. To act in another workspace for a single call, pass `workspace` to that tool instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workspace": {
+            "type": "string",
+            "description": "Workspace name or id, from list_workspaces"
+          }
+        },
+        "required": [
+          "workspace"
+        ]
+      }
+    },
+    {
+      "name": "create_workspace",
+      "description": "Create a workspace for another company you hire for, and switch to it. Its roles and shortlist are kept apart from your other workspaces.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "e.g. the company's name (1-60 characters)"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "list_workspace_members",
+      "description": "Who is in your current workspace (or `workspace`), with their role (owner or member), and, if you own it, the invites still open.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workspace": {
+            "type": "string",
+            "description": "Workspace name or id (optional). Default: your current workspace, the one the web app shows. See list_workspaces."
+          }
+        }
+      }
+    },
+    {
+      "name": "invite_to_workspace",
+      "description": "Invite a teammate by email into a workspace you own (not your Personal one): they get an email from AyHire with a link, sign in with that address and join, then see its roles, picks and shortlist. The link is also returned so you can share it another way; it works for 7 days. Pass send_email=false to only get the link. Inviting the same address again sends a new link.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "Their email address"
+          },
+          "workspace": {
+            "type": "string",
+            "description": "Workspace name or id (optional). Default: your current workspace, the one the web app shows. See list_workspaces."
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "member",
+              "owner"
+            ],
+            "description": "member (default) or owner (can invite and remove people)",
+            "default": "member"
+          },
+          "send_email": {
+            "type": "boolean",
+            "description": "Email them the link (default true)",
+            "default": true
+          }
+        },
+        "required": [
+          "email"
+        ]
+      }
+    }
+  ]
+}
