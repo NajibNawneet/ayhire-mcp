@@ -1,0 +1,11 @@
+{
+  "name": "ayhire",
+  "owner": { "name": "AY Automate", "url": "https://ayhire.com" },
+  "plugins": [
+    {
+      "name": "ayhire",
+      "source": "./",
+      "description": "Find, judge and shortlist engineers from their public GitHub work."
+    }
+  ]
+}

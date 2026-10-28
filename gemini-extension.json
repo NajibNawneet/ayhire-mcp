@@ -1,0 +1,11 @@
+{
+  "name": "ayhire",
+  "version": "1.0.1",
+  "description": "Find, judge and shortlist engineers from their public GitHub work.",
+  "mcpServers": {
+    "ayhire": {
+      "httpUrl": "https://ayhire.com/mcp"
+    }
+  },
+  "contextFileName": "skills/ayhire/SKILL.md"
+}

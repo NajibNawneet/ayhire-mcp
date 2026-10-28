@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# headersHelper for the AyHire MCP server: prints {"Authorization": "Bearer ..."} or {}.
+exec "$(dirname "$0")/ayhire" headers

@@ -1,0 +1,9 @@
+{
+  "name": "ayhire",
+  "description": "Find, judge and shortlist engineers from their public GitHub work.",
+  "version": "1.0.1",
+  "author": { "name": "AY Automate", "url": "https://ayhire.com" },
+  "homepage": "https://ayhire.com",
+  "repository": "https://github.com/NajibNawneet/ayhire-mcp",
+  "license": "MIT"
+}

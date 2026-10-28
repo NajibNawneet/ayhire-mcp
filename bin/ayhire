@@ -1,0 +1,255 @@
+#!/usr/bin/env bash
+# ayhire: command-line companion for the AyHire Claude Code plugin.
+# Needs only bash (3.2+) and curl.
+#
+# Exit codes (stable, the setup skill branches on them):
+#   0 ok   2 usage   3 not logged in / key invalid   4 login denied or expired   5 network / server error
+# logout: 0 signed out (or nothing to do), 5 the key could not be revoked (still saved)
+set -uo pipefail
+
+VERSION="0.2.0"
+DEFAULT_URL="https://ayhire.com" # set AYHIRE_URL to use another server (e.g. http://localhost:3000)
+AYHIRE_URL="${AYHIRE_URL:-$DEFAULT_URL}"
+AYHIRE_URL="${AYHIRE_URL%/}"
+CONFIG_DIR="${AYHIRE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/ayhire}"
+CRED_FILE="$CONFIG_DIR/credentials.json"
+
+EXIT_USAGE=2 EXIT_NOT_LOGGED_IN=3 EXIT_DENIED=4 EXIT_NETWORK=5
+
+# First "key": "string" value in stdin. Our server's JSON values never contain quotes.
+json_str() { sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1; }
+json_num() { sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p" | head -n 1; }
+
+saved_key() {
+  if [ -n "${AYHIRE_API_KEY:-}" ]; then printf '%s' "$AYHIRE_API_KEY"; return; fi
+  [ -f "$CRED_FILE" ] && json_str api_key < "$CRED_FILE"
+}
+
+# The key `ayhire login` saved, from the file only (never AYHIRE_API_KEY).
+file_key() { [ -f "$CRED_FILE" ] && json_str api_key < "$CRED_FILE"; }
+
+# The server that key was saved for. Only https, or http on this computer, is used.
+# No "@" (http://localhost:1@other.example would send the key to other.example) and no spaces.
+saved_url() {
+  local u=""
+  [ -f "$CRED_FILE" ] && u=$(json_str url < "$CRED_FILE")
+  case "$u" in
+    *@*|*[[:space:]]*) ;;
+    https://*|http://localhost|http://localhost:*|http://127.0.0.1|http://127.0.0.1:*) printf '%s' "${u%/}" ;;
+  esac
+}
+
+# http METHOD PATH [JSON_BODY] [API_KEY]  -> sets STATUS and BODY; returns 1 on network failure.
+# The key goes to curl on stdin (--config -), so it never shows up in `ps`.
+http() {
+  local method=$1 path=$2 data=${3:-} key=${4:-} out
+  local args=(-sS --max-time 30 -X "$method" -H "content-type: application/json" -H "accept: application/json" -w $'\n%{http_code}')
+  [ -n "$data" ] && args+=(--data "$data")
+  if [ -n "$key" ]; then
+    out=$(printf 'header = "authorization: Bearer %s"\n' "$key" | curl --config - "${args[@]}" "$AYHIRE_URL$path" 2>/dev/null) || { STATUS=000; BODY=""; return 1; }
+  else
+    out=$(curl "${args[@]}" "$AYHIRE_URL$path" 2>/dev/null) || { STATUS=000; BODY=""; return 1; }
+  fi
+  STATUS=${out##*$'\n'}
+  BODY=${out%$'\n'*}
+}
+
+network_error() {
+  echo "Can't reach AyHire at $AYHIRE_URL. Check your connection (or AYHIRE_URL) and try again." >&2
+  exit $EXIT_NETWORK
+}
+
+open_browser() {
+  [ -n "${AYHIRE_NO_BROWSER:-}" ] && return
+  if command -v open >/dev/null 2>&1; then open "$1" >/dev/null 2>&1 &
+  elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$1" >/dev/null 2>&1 &
+  elif command -v wslview >/dev/null 2>&1; then wslview "$1" >/dev/null 2>&1 &
+  fi
+}
+
+save_credentials() {
+  local key=$1 email=$2
+  mkdir -p "$CONFIG_DIR" && chmod 700 "$CONFIG_DIR"
+  (umask 077 && printf '{"api_key":"%s","url":"%s","email":"%s","saved_at":"%s"}\n' \
+    "$key" "$AYHIRE_URL" "$email" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$CRED_FILE")
+}
+
+cmd_status() {
+  local key; key=$(saved_key)
+  if [ -z "$key" ]; then
+    echo "Not logged in. Run: ayhire login"
+    exit $EXIT_NOT_LOGGED_IN
+  fi
+  http GET /api/me "" "$key" || network_error
+  case "$STATUS" in
+    200) echo "Logged in to $AYHIRE_URL as $(json_str email <<<"$BODY") (key ${key:0:12}…)" ;;
+    401) echo "Your saved AyHire key is invalid or was revoked. Run: ayhire login"; exit $EXIT_NOT_LOGGED_IN ;;
+    *)   echo "AyHire returned HTTP $STATUS. Try again in a minute." >&2; exit $EXIT_NETWORK ;;
+  esac
+}
+
+# ayhire login --with-key < keyfile: save an existing key (CI, servers, keys made on the web).
+# The key file is the only way to hand a key to Claude Code: it strips secret-looking
+# environment variables like AYHIRE_API_KEY before running plugin helpers.
+cmd_login_with_key() {
+  local key email
+  IFS= read -r key || true
+  key=$(printf '%s' "$key" | tr -d '[:space:]')
+  if ! printf '%s' "$key" | grep -qE '^ayh_[A-Za-z0-9_-]{43}$'; then
+    echo "That doesn't look like an AyHire key (ayh_ followed by 43 characters)." >&2
+    exit $EXIT_USAGE
+  fi
+  http GET /api/me "" "$key" || network_error
+  if [ "$STATUS" != 200 ]; then
+    echo "AyHire rejected that key (HTTP $STATUS). Create a new one with: ayhire login" >&2
+    exit $EXIT_NOT_LOGGED_IN
+  fi
+  email=$(json_str email <<<"$BODY")
+  save_credentials "$key" "${email:-}"
+  echo "Logged in as ${email:-your account}. Key saved to $CRED_FILE"
+}
+
+cmd_login() {
+  [ "${1:-}" = "--with-key" ] && { cmd_login_with_key; return; }
+  local host name device code url expires interval deadline
+  host=$(hostname -s 2>/dev/null | tr -cd 'A-Za-z0-9._-')
+  name="Claude Code (${host:-this computer})"
+  http POST /api/cli/login "{\"client_name\":\"$name\"}" || network_error
+  if [ "$STATUS" != 200 ]; then
+    echo "Couldn't start login (HTTP $STATUS): $(json_str error <<<"$BODY")" >&2
+    exit $EXIT_NETWORK
+  fi
+  device=$(json_str device_code <<<"$BODY")
+  code=$(json_str user_code <<<"$BODY")
+  url=$(json_str verification_url_complete <<<"$BODY")
+  expires=$(json_num expires_in <<<"$BODY"); expires=${expires:-600}
+  interval=$(json_num interval <<<"$BODY"); interval=${interval:-3}
+
+  echo "Your login code: $code"
+  echo "Confirm it in your browser: $url"
+  echo "(Waiting up to $((expires / 60)) minutes. Sign up there if you don't have an account yet.)"
+  open_browser "$url"
+
+  deadline=$(( $(date +%s) + expires ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    sleep "$interval"
+    http POST /api/cli/login/token "{\"device_code\":\"$device\"}" || continue
+    case "$STATUS" in
+      200)
+        local key email
+        key=$(json_str api_key <<<"$BODY")
+        http GET /api/me "" "$key" && email=$(json_str email <<<"$BODY")
+        save_credentials "$key" "${email:-}"
+        echo "Logged in as ${email:-your account}. Key saved to $CRED_FILE"
+        echo "If AyHire's tools aren't available in Claude Code yet, run /mcp and reconnect \"ayhire\"."
+        exit 0 ;;
+      400) ;;                              # authorization_pending
+      429) sleep "$interval" ;;            # slow_down
+      *)
+        echo "Login didn't complete: $(json_str message <<<"$BODY")" >&2
+        exit $EXIT_DENIED ;;
+    esac
+  done
+  echo "Login timed out. Run: ayhire login" >&2
+  exit $EXIT_DENIED
+}
+
+cmd_logout() {
+  local key url saved refused="" env_note=""
+  if [ -n "${AYHIRE_API_KEY:-}" ]; then
+    env_note="AYHIRE_API_KEY is set in this shell. That key still works: revoke it at $AYHIRE_URL/app/integrations#keys if you no longer need it."
+  fi
+  if [ ! -f "$CRED_FILE" ]; then
+    echo "No AyHire key is saved on this computer."
+    [ -n "$env_note" ] && echo "$env_note"
+    exit 0
+  fi
+  key=$(file_key)
+  if [ -z "$key" ]; then
+    rm -f "$CRED_FILE"
+    echo "Deleted the AyHire settings on this computer. They held no key."
+    [ -n "$env_note" ] && echo "$env_note"
+    exit 0
+  fi
+  # The key belongs to the server it was saved for, not to whatever AYHIRE_URL says now.
+  url=$(saved_url)
+  # A saved url that saved_url refuses (not https or this computer): the revoke goes to AYHIRE_URL, which may be
+  # another server. Then only its "revoked" counts; its "unknown key" says nothing about the server the key came from.
+  saved=$(json_str url < "$CRED_FILE")
+  [ -z "$url" ] && [ -n "$saved" ] && refused=$saved
+  AYHIRE_URL="${url:-$AYHIRE_URL}"
+  if ! http DELETE /api/keys/current "" "$key"; then
+    echo "Couldn't reach AyHire at $AYHIRE_URL, so the key was NOT revoked. It is still saved in $CRED_FILE." >&2
+    echo "Try again, or revoke it at $AYHIRE_URL/app/integrations#keys and then run ayhire logout again." >&2
+    exit $EXIT_NETWORK
+  fi
+  # Believe only AyHire's own answer: a 200 that says so, or AyHire's error codes for a dead key. Anything else (another
+  # app now on that port, a proxy's 404 page) proves nothing, and the key may still work elsewhere (a key made against a
+  # dev server can live in the hosted database).
+  local outcome=unknown
+  case "$STATUS" in
+    200) grep -q '"revoked":true' <<<"$BODY" && outcome=revoked ;;
+    401) [ "$(json_str code <<<"$BODY")" = unauthorized ] && outcome=gone ;;
+    404) [ "$(json_str code <<<"$BODY")" = not_found ] && outcome=gone ;;
+  esac
+  [ "$outcome" = gone ] && [ -n "$refused" ] && outcome=elsewhere
+  case "$outcome" in
+    revoked)
+      rm -f "$CRED_FILE"
+      echo "Signed out. The key saved on this computer (${key:0:12}…) was revoked on AyHire and deleted." ;;
+    gone)
+      rm -f "$CRED_FILE"
+      echo "That key had already been revoked on AyHire. Deleted it from this computer." ;;
+    elsewhere)
+      echo "This key was saved for $refused, which ayhire logout won't contact (it only uses https, or http on this computer)." >&2
+      echo "$AYHIRE_URL doesn't know the key, so treat it as NOT revoked. It is still saved in $CRED_FILE." >&2
+      echo "Revoke it in Integrations on the server it came from, then delete that file." >&2
+      exit $EXIT_NETWORK ;;
+    *)
+      echo "AyHire at $AYHIRE_URL didn't confirm the revoke (HTTP $STATUS), so treat the key as NOT revoked. It is still saved in $CRED_FILE." >&2
+      echo "Try again in a minute, or revoke it at $AYHIRE_URL/app/integrations#keys." >&2
+      exit $EXIT_NETWORK ;;
+  esac
+  echo "Agents that used this key stop working on their next call. In Claude Code, run /mcp and reconnect or remove \"ayhire\"."
+  echo "If you added AyHire to other agents with this key, remove the ayhire entry from their settings too."
+  # setup.md's Codex row has the shell profile read AYHIRE_API_KEY from the key file, so it is often this same key.
+  if [ -n "$env_note" ] && [ "${AYHIRE_API_KEY:-}" = "$key" ]; then
+    echo "AYHIRE_API_KEY in this shell is this same key, so it stopped working too. If your shell profile sets it, remove that line (or run ayhire login to sign in again)."
+  elif [ -n "$env_note" ]; then
+    echo "$env_note"
+  fi
+  exit 0
+}
+
+# Used by the plugin's MCP headersHelper: prints the auth header as JSON, nothing else.
+cmd_headers() {
+  local key; key=$(saved_key)
+  if [ -n "$key" ]; then printf '{"Authorization":"Bearer %s"}\n' "$key"; else printf '{}\n'; fi
+}
+
+usage() {
+  cat <<EOF
+ayhire $VERSION, the AyHire command line (talks to $AYHIRE_URL)
+
+  ayhire login     Sign in (or sign up) in the browser and save a key on this computer
+  ayhire login --with-key < file   Save an existing key read from stdin (CI, servers)
+  ayhire status    Check that the saved key works and which account it belongs to
+  ayhire logout    Revoke the key on AyHire and delete it from this computer
+  ayhire headers   Print the MCP auth header as JSON (used by Claude Code)
+
+Environment: AYHIRE_URL (server), AYHIRE_CONFIG_DIR (where the key is saved, default
+~/.config/ayhire), AYHIRE_NO_BROWSER=1. AYHIRE_API_KEY overrides the saved key for this CLI
+only: Claude Code strips secret-looking variables from plugin helpers, so the MCP connection
+always uses the saved key.
+EOF
+}
+
+case "${1:-help}" in
+  login) cmd_login "${2:-}" ;;
+  status|whoami) cmd_status ;;
+  logout) cmd_logout ;;
+  headers) cmd_headers ;;
+  version|--version|-v) echo "ayhire $VERSION" ;;
+  help|--help|-h) usage ;;
+  *) usage >&2; exit $EXIT_USAGE ;;
+esac

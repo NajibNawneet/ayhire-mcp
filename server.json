@@ -1,0 +1,24 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "com.ayhire/ayhire",
+  "title": "AyHire",
+  "description": "Hire engineers by what they shipped: find, judge and shortlist developers from public GitHub work.",
+  "version": "1.0.1",
+  "websiteUrl": "https://ayhire.com",
+  "repository": {
+    "url": "https://github.com/NajibNawneet/ayhire-mcp",
+    "source": "github"
+  },
+  "icons": [
+    {
+      "src": "https://ayhire.com/icon.svg",
+      "mimeType": "image/svg+xml"
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://ayhire.com/mcp"
+    }
+  ]
+}

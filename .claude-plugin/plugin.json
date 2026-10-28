@@ -1,0 +1,10 @@
+{
+  "name": "ayhire",
+  "version": "0.2.0",
+  "description": "Find and evaluate developers from what they actually built on GitHub, right from Claude Code.",
+  "author": { "name": "AY Automate", "url": "https://ayautomate.com" },
+  "homepage": "https://ayhire.com",
+  "repository": "https://github.com/NajibNawneet/ayhire-mcp",
+  "license": "MIT",
+  "keywords": ["recruiting", "hiring", "github", "talent", "sourcing"]
+}

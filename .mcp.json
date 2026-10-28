@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "ayhire": {
+      "type": "http",
+      "url": "${AYHIRE_URL:-https://ayhire.com}/api/mcp",
+      "headersHelper": "${CLAUDE_PLUGIN_ROOT}/bin/ayhire-mcp-headers"
+    }
+  }
+}
